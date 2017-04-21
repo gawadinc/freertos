@@ -1,0 +1,312 @@
+diff -ur ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/include/task.h source/include/task.h
+--- ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/include/task.h	2016-05-20 17:23:52.000000000 -0700
++++ source/include/task.h	2017-04-20 17:06:03.000000000 -0700
+@@ -1286,6 +1286,7 @@
+  * \ingroup TaskUtils
+  */
+ TickType_t xTaskGetTickCount( void ) PRIVILEGED_FUNCTION;
++uint64_t xTaskGetExtendedTickCount( void ) PRIVILEGED_FUNCTION;
+ 
+ /**
+  * task. h
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: BCC
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: CCS
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: CodeWarrior
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: Common
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM7_AT91FR40008
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM7_AT91SAM7S
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM7_LPC2000
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM7_LPC23xx
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CA53_64_BIT
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CA9
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CM0
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CM3
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CM3_MPU
+diff -ur ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c source/portable/GCC/ARM_CM4F/port.c
+--- ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c	2016-05-20 17:23:52.000000000 -0700
++++ source/portable/GCC/ARM_CM4F/port.c	2017-04-20 17:06:03.000000000 -0700
+@@ -1,5 +1,5 @@
+ /*
+-    FreeRTOS V9.0.0 - Copyright (C) 2016 Real Time Engineers Ltd.
++    FreeRTOS V8.2.3 - Copyright (C) 2015 Real Time Engineers Ltd.
+     All rights reserved
+ 
+     VISIT http://www.FreeRTOS.org TO ENSURE YOU ARE USING THE LATEST VERSION.
+@@ -134,10 +134,6 @@
+ /* The systick is a 24-bit counter. */
+ #define portMAX_24_BIT_NUMBER				( 0xffffffUL )
+ 
+-/* For strict compliance with the Cortex-M spec the task start address should
+-have bit-0 clear, as it is loaded into the PC on exit from an ISR. */
+-#define portSTART_ADDRESS_MASK		( ( StackType_t ) 0xfffffffeUL )
+-
+ /* A fiddle factor to estimate the number of SysTick counts that would have
+ occurred while the SysTick counter is stopped during tickless idle
+ calculations. */
+@@ -178,7 +174,7 @@
+ /*
+  * Function to enable the VFP.
+  */
+-static void vPortEnableVFP( void ) __attribute__ (( naked ));
++ static void vPortEnableVFP( void ) __attribute__ (( naked ));
+ 
+ /*
+  * Used to catch tasks that attempt to return from their implementing function.
+@@ -237,7 +233,7 @@
+ 
+ 	*pxTopOfStack = portINITIAL_XPSR;	/* xPSR */
+ 	pxTopOfStack--;
+-	*pxTopOfStack = ( ( StackType_t ) pxCode ) & portSTART_ADDRESS_MASK;	/* PC */
++	*pxTopOfStack = ( StackType_t ) pxCode;	/* PC */
+ 	pxTopOfStack--;
+ 	*pxTopOfStack = ( StackType_t ) portTASK_RETURN_ADDRESS;	/* LR */
+ 
+@@ -283,7 +279,7 @@
+ 					"	msr	basepri, r0					\n"
+ 					"	bx r14							\n"
+ 					"									\n"
+-					"	.align 4						\n"
++					"	.align 2						\n"
+ 					"pxCurrentTCBConst2: .word pxCurrentTCB				\n"
+ 				);
+ }
+@@ -456,7 +452,7 @@
+ 	"	mov r0, %0 							\n"
+ 	"	msr basepri, r0						\n"
+ 	"	dsb									\n"
+-	"	isb									\n"
++	"   isb									\n"
+ 	"	bl vTaskSwitchContext				\n"
+ 	"	mov r0, #0							\n"
+ 	"	msr basepri, r0						\n"
+@@ -483,7 +479,7 @@
+ 	"										\n"
+ 	"	bx r14								\n"
+ 	"										\n"
+-	"	.align 4							\n"
++	"	.align 2							\n"
+ 	"pxCurrentTCBConst: .word pxCurrentTCB	\n"
+ 	::"i"(configMAX_SYSCALL_INTERRUPT_PRIORITY)
+ 	);
+@@ -496,7 +492,7 @@
+ 	executes all interrupts must be unmasked.  There is therefore no need to
+ 	save and then restore the interrupt mask value as its value is already
+ 	known. */
+-	portDISABLE_INTERRUPTS();
++	( void ) portSET_INTERRUPT_MASK_FROM_ISR();
+ 	{
+ 		/* Increment the RTOS tick. */
+ 		if( xTaskIncrementTick() != pdFALSE )
+@@ -506,7 +502,7 @@
+ 			portNVIC_INT_CTRL_REG = portNVIC_PENDSVSET_BIT;
+ 		}
+ 	}
+-	portENABLE_INTERRUPTS();
++	portCLEAR_INTERRUPT_MASK_FROM_ISR( 0 );
+ }
+ /*-----------------------------------------------------------*/
+ 
+@@ -541,8 +537,6 @@
+ 		/* Enter a critical section but don't use the taskENTER_CRITICAL()
+ 		method as that will mask interrupts that should exit sleep mode. */
+ 		__asm volatile( "cpsid i" );
+-		__asm volatile( "dsb" );
+-		__asm volatile( "isb" );
+ 
+ 		/* If a context switch is pending or a task is waiting for the scheduler
+ 		to be unsuspended then abandon the low power entry. */
+@@ -581,14 +575,14 @@
+ 			should not be executed again.  However, the original expected idle
+ 			time variable must remain unmodified, so a copy is taken. */
+ 			xModifiableIdleTime = xExpectedIdleTime;
+-			configPRE_SLEEP_PROCESSING( xModifiableIdleTime );
++			configPRE_SLEEP_PROCESSING( &xModifiableIdleTime );
+ 			if( xModifiableIdleTime > 0 )
+ 			{
+ 				__asm volatile( "dsb" );
+ 				__asm volatile( "wfi" );
+ 				__asm volatile( "isb" );
+ 			}
+-			configPOST_SLEEP_PROCESSING( xExpectedIdleTime );
++			configPOST_SLEEP_PROCESSING( &xExpectedIdleTime );
+ 
+ 			/* Stop SysTick.  Again, the time the SysTick is stopped for is
+ 			accounted for as best it can be, but using the tickless mode will
+@@ -642,7 +636,7 @@
+ 
+ 				/* The reload value is set to whatever fraction of a single tick
+ 				period remains. */
+-				portNVIC_SYSTICK_LOAD_REG = ( ( ulCompleteTickPeriods + 1UL ) * ulTimerCountsForOneTick ) - ulCompletedSysTickDecrements;
++				portNVIC_SYSTICK_LOAD_REG = ( ( ulCompleteTickPeriods + 1 ) * ulTimerCountsForOneTick ) - ulCompletedSysTickDecrements;
+ 			}
+ 
+ 			/* Restart SysTick so it runs from portNVIC_SYSTICK_LOAD_REG
+@@ -759,5 +753,3 @@
+ 	}
+ 
+ #endif /* configASSERT_DEFINED */
+-
+-
+diff -ur ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC/ARM_CM4F/portmacro.h source/portable/GCC/ARM_CM4F/portmacro.h
+--- ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC/ARM_CM4F/portmacro.h	2016-05-20 17:23:52.000000000 -0700
++++ source/portable/GCC/ARM_CM4F/portmacro.h	2017-04-20 17:06:03.000000000 -0700
+@@ -1,5 +1,5 @@
+ /*
+-    FreeRTOS V9.0.0 - Copyright (C) 2016 Real Time Engineers Ltd.
++    FreeRTOS V8.2.3 - Copyright (C) 2015 Real Time Engineers Ltd.
+     All rights reserved
+ 
+     VISIT http://www.FreeRTOS.org TO ENSURE YOU ARE USING THE LATEST VERSION.
+@@ -113,7 +113,6 @@
+ 
+ /* Architecture specifics. */
+ #define portSTACK_GROWTH			( -1 )
+-#define portTICK_PERIOD_MS			( ( TickType_t ) 1000 / configTICK_RATE_HZ )
+ #define portBYTE_ALIGNMENT			8
+ /*-----------------------------------------------------------*/
+ 
+@@ -188,7 +187,7 @@
+ 
+ 	/*-----------------------------------------------------------*/
+ 
+-	#define portGET_HIGHEST_PRIORITY( uxTopPriority, uxReadyPriorities ) uxTopPriority = ( 31UL - ( uint32_t ) ucPortCountLeadingZeros( ( uxReadyPriorities ) ) )
++	#define portGET_HIGHEST_PRIORITY( uxTopPriority, uxReadyPriorities ) uxTopPriority = ( 31 - ucPortCountLeadingZeros( ( uxReadyPriorities ) ) )
+ 
+ #endif /* configUSE_PORT_OPTIMISED_TASK_SELECTION */
+ 
+@@ -202,32 +201,10 @@
+ /* portNOP() is not required by this port. */
+ #define portNOP()
+ 
+-#define portINLINE	__inline
+-
+ #ifndef portFORCE_INLINE
+ 	#define portFORCE_INLINE inline __attribute__(( always_inline))
+ #endif
+ 
+-portFORCE_INLINE static BaseType_t xPortIsInsideInterrupt( void )
+-{
+-uint32_t ulCurrentInterrupt;
+-BaseType_t xReturn;
+-
+-	/* Obtain the number of the currently executing interrupt. */
+-	__asm volatile( "mrs %0, ipsr" : "=r"( ulCurrentInterrupt ) );
+-
+-	if( ulCurrentInterrupt == 0 )
+-	{
+-		xReturn = pdFALSE;
+-	}
+-	else
+-	{
+-		xReturn = pdTRUE;
+-	}
+-
+-	return xReturn;
+-}
+-
+ /*-----------------------------------------------------------*/
+ 
+ portFORCE_INLINE static void vPortRaiseBASEPRI( void )
+@@ -281,4 +258,3 @@
+ #endif
+ 
+ #endif /* PORTMACRO_H */
+-
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CM4_MPU
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CM7
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CR5
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ARM_CRx_No_GIC
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ATMega323
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: AVR32_UC3
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: CORTUS_APS3
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: ColdFire_V2
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: H8S2329
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: HCS12
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: IA32_flat
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: MCF5235
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: MSP430F449
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: MicroBlaze
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: MicroBlazeV8
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: MicroBlazeV9
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: NiosII
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: PPC405_Xilinx
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: PPC440_Xilinx
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: RL78
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: RX100
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: RX600
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: RX600v2
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: STR75x
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable/GCC: TriCore_1782
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: IAR
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: Keil
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: MPLAB
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: MSVC-MingW
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: MemMang
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: MikroC
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: Paradigm
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: RVDS
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: Renesas
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: Rowley
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: SDCC
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: Softune
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: Tasking
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: WizC
+Only in ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/portable: oWatcom
+diff -ur ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/tasks.c source/tasks.c
+--- ../../src/FreeRTOSv9.0.0/FreeRTOS/Source/tasks.c	2016-05-20 17:23:52.000000000 -0700
++++ source/tasks.c	2017-04-20 17:06:03.000000000 -0700
+@@ -395,6 +395,7 @@
+ /* Other file private variables. --------------------------------*/
+ PRIVILEGED_DATA static volatile UBaseType_t uxCurrentNumberOfTasks 	= ( UBaseType_t ) 0U;
+ PRIVILEGED_DATA static volatile TickType_t xTickCount 				= ( TickType_t ) 0U;
++PRIVILEGED_DATA static volatile uint64_t xExtendedTickCount 				= ( uint64_t) 0U;
+ PRIVILEGED_DATA static volatile UBaseType_t uxTopReadyPriority 		= tskIDLE_PRIORITY;
+ PRIVILEGED_DATA static volatile BaseType_t xSchedulerRunning 		= pdFALSE;
+ PRIVILEGED_DATA static volatile UBaseType_t uxPendedTicks 			= ( UBaseType_t ) 0U;
+@@ -1898,6 +1899,7 @@
+ 		xNextTaskUnblockTime = portMAX_DELAY;
+ 		xSchedulerRunning = pdTRUE;
+ 		xTickCount = ( TickType_t ) 0U;
++		xExtendedTickCount = ( uint64_t ) 0U;
+ 
+ 		/* If configGENERATE_RUN_TIME_STATS is defined then the following
+ 		macro must be defined to configure the timer/counter used to generate
+@@ -2137,6 +2139,19 @@
+ 
+ 	return xTicks;
+ }
++
++uint64_t xTaskGetExtendedTickCount( void )
++{
++	uint64_t xExtendedTicks;
++
++	portENTER_CRITICAL();
++	{
++		xExtendedTicks = xExtendedTickCount;
++	}
++	portEXIT_CRITICAL();
++
++	return xExtendedTicks;
++}
+ /*-----------------------------------------------------------*/
+ 
+ TickType_t xTaskGetTickCountFromISR( void )
+@@ -2416,6 +2431,8 @@
+ 		each stepped tick. */
+ 		configASSERT( ( xTickCount + xTicksToJump ) <= xNextTaskUnblockTime );
+ 		xTickCount += xTicksToJump;
++		xExtendedTickCount += (uint64_t) xTicksToJump;
++		configASSERT((uint32_t) (xExtendedTickCount & 0xFFFFFFFFUL) == xTickCount);
+ 		traceINCREASE_TICK_COUNT( xTicksToJump );
+ 	}
+ 
+@@ -2516,6 +2533,9 @@
+ 		delayed lists if it wraps to 0. */
+ 		xTickCount = xConstTickCount;
+ 
++		xExtendedTickCount = xExtendedTickCount + 1;
++		configASSERT((uint32_t) (xExtendedTickCount & 0xFFFFFFFFUL) == xTickCount);
++
+ 		if( xConstTickCount == ( TickType_t ) 0U )
+ 		{
+ 			taskSWITCH_DELAYED_LISTS();
